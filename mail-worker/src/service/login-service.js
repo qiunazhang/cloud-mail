@@ -215,16 +215,23 @@ const loginService = {
 
 		const userRow = await userService.selectByEmailIncludeDel(c, email);
 
+		// Unified error message to prevent username enumeration
+		const LOGIN_FAIL_MSG = t('loginFail');
+
 		if (!userRow) {
-			throw new BizError(t('notExistUser'));
+			// Dummy password verification to prevent timing attack
+			await cryptoUtils.verifyPassword(password || '', 'dummy-salt-dummy-dummy-dummy', 'dummy-hash');
+			throw new BizError(LOGIN_FAIL_MSG);
 		}
 
 		if(userRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelUser'));
+			await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password);
+			throw new BizError(LOGIN_FAIL_MSG);
 		}
 
 		if(userRow.status === userConst.status.BAN) {
-			throw new BizError(t('isBanUser'));
+			await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password);
+			throw new BizError(LOGIN_FAIL_MSG);
 		}
 
 		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password) && !noVerifyPwd) {
@@ -240,7 +247,7 @@ const loginService = {
 			}
 
 			await c.env.kv.put(KvConst.LOGIN_FAIL + email, JSON.stringify(newCount), { expirationTtl: constant.LOGIN_LOCK_TTL });
-			throw new BizError(t('IncorrectPwd'));
+			throw new BizError(LOGIN_FAIL_MSG);
 		}
 
 		// Login success — clear fail count and lock

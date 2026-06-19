@@ -65,6 +65,7 @@ const zh = {
 	publicTokenFail: 'token验证失败',
 	notAdmin: '输入的邮箱不是管理员邮箱',
 	emailExistDatabase: '有邮箱已存在数据库中',
+	loginFail: '邮箱或密码错误',
 	loginLocked: '登录失败次数过多，账号已锁定30分钟',
 	notConfigOss: '对象存储未配置',
 	perms: {
