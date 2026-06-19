@@ -19,6 +19,13 @@ const publicService = {
 
 	async emailList(c, params) {
 
+		// SECURITY: Require public API token for email queries
+		const userPublicToken = await c.env.kv.get(KvConst.PUBLIC_KEY);
+		const publicToken = c.req.header('Authorization');
+		if (!userPublicToken || publicToken !== userPublicToken) {
+			throw new BizError(t('publicTokenFail'), 401);
+		}
+
 		let { toEmail, content, subject, sendName, sendEmail, timeSort, num, size, type , isDel } = params
 
 		const query = orm(c).select({
@@ -51,23 +58,23 @@ const publicService = {
 		let conditions = []
 
 		if (toEmail) {
-			conditions.push(sql`${email.toEmail} COLLATE NOCASE LIKE ${toEmail}`)
+			conditions.push(sql`${email.toEmail} COLLATE NOCASE LIKE ${'%' + toEmail + '%'}`)
 		}
 
 		if (sendEmail) {
-			conditions.push(sql`${email.sendEmail} COLLATE NOCASE LIKE ${sendEmail}`)
+			conditions.push(sql`${email.sendEmail} COLLATE NOCASE LIKE ${'%' + sendEmail + '%'}`)
 		}
 
 		if (sendName) {
-			conditions.push(sql`${email.name} COLLATE NOCASE LIKE ${sendName}`)
+			conditions.push(sql`${email.name} COLLATE NOCASE LIKE ${'%' + sendName + '%'}`)
 		}
 
 		if (subject) {
-			conditions.push(sql`${email.subject} COLLATE NOCASE LIKE ${subject}`)
+			conditions.push(sql`${email.subject} COLLATE NOCASE LIKE ${'%' + subject + '%'}`)
 		}
 
 		if (content) {
-			conditions.push(sql`${email.content} COLLATE NOCASE LIKE ${content}`)
+			conditions.push(sql`${email.content} COLLATE NOCASE LIKE ${'%' + content + '%'}`)
 		}
 
 		if (type || type === 0) {
@@ -99,6 +106,16 @@ const publicService = {
 
 		if (list.length === 0) return;
 
+		const activeIp = reqUtils.getIp(c);
+		const { os, browser, device } = reqUtils.getUserAgent(c);
+		const activeTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
+
+		const roleList = await roleService.roleSelectUse(c);
+		const defRole = roleList.find(roleRow => roleRow.isDefault === roleConst.isDefault.OPEN);
+
+		// SECURITY: Use D1 parameterized queries (bind) to prevent SQL injection
+		const statements = [];
+
 		for (const emailRow of list) {
 			if (!verifyUtils.isEmail(emailRow.email)) {
 				throw new BizError(t('notEmail'));
@@ -112,44 +129,34 @@ const publicService = {
 				emailRow.password || cryptoUtils.genRandomPwd()
 			);
 
-			emailRow.salt = salt;
-			emailRow.hash = hash;
-		}
-
-
-		const activeIp = reqUtils.getIp(c);
-		const { os, browser, device } = reqUtils.getUserAgent(c);
-		const activeTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
-
-		const roleList = await roleService.roleSelectUse(c);
-		const defRole = roleList.find(roleRow => roleRow.isDefault === roleConst.isDefault.OPEN);
-
-		const userList = [];
-
-		for (const emailRow of list) {
-			let { email, hash, salt, roleName } = emailRow;
 			let type = defRole.roleId;
 
-			if (roleName) {
-				const roleRow = roleList.find(role => role.name === roleName);
+			if (emailRow.roleName) {
+				const roleRow = roleList.find(role => role.name === emailRow.roleName);
 				type = roleRow ? roleRow.roleId : type;
 			}
 
-			const userSql = `INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time)
-			VALUES ('${email}', '${hash}', '${salt}', '${type}', '${os}', '${browser}', '${activeIp}', '${activeIp}', '${device}', '${activeTime}', '${activeTime}')`
+			statements.push(
+				c.env.db.prepare(
+					'INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+				).bind(emailRow.email, hash, salt, type, os, browser, activeIp, activeIp, device, activeTime, activeTime)
+			);
 
-			const accountSql = `INSERT INTO account (email, name, user_id)
-			VALUES ('${email}', '${emailUtils.getName(email)}', 0);`;
-
-			userList.push(c.env.db.prepare(userSql));
-			userList.push(c.env.db.prepare(accountSql));
-
+			statements.push(
+				c.env.db.prepare(
+					'INSERT INTO account (email, name, user_id) VALUES (?, ?, ?)'
+				).bind(emailRow.email, emailUtils.getName(emailRow.email), 0)
+			);
 		}
 
-		userList.push(c.env.db.prepare(`UPDATE account SET user_id = (SELECT user_id FROM user WHERE user.email = account.email) WHERE user_id = 0;`))
+		statements.push(
+			c.env.db.prepare(
+				'UPDATE account SET user_id = (SELECT user_id FROM user WHERE user.email = account.email) WHERE user_id = 0;'
+			)
+		);
 
 		try {
-			await c.env.db.batch(userList);
+			await c.env.db.batch(statements);
 		} catch (e) {
 			if(e.message.includes('SQLITE_CONSTRAINT')) {
 				throw new BizError(t('emailExistDatabase'))
