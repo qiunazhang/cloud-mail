@@ -3,6 +3,9 @@ const constant = {
 	JWT_UID: 'user_id:',
 	JWT_TOKEN: 'token:',
 	TOKEN_EXPIRE: 60 * 60 * 24 * 30,
+	LOGIN_FAIL_MAX: 10,
+	LOGIN_LOCK_MINUTES: 30,
+	LOGIN_LOCK_TTL: 60 * 30,
 	ATTACHMENT_PREFIX: 'attachments/',
 	BACKGROUND_PREFIX: 'static/background/',
 	ADMIN_ROLE: {

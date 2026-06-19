@@ -65,6 +65,7 @@ const en = {
 	publicTokenFail: 'Token validation failed',
 	notAdmin: 'The entered email is not an administrator email',
 	emailExistDatabase: 'Email already exists in the database',
+	loginLocked: 'Too many failed attempts. Account locked for 30 minutes',
 	notConfigOss: 'Object storage not configured',
 	perms: {
 		"邮件": "Emails",

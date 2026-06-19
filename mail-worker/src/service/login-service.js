@@ -207,6 +207,12 @@ const loginService = {
 			throw new BizError(t('emailAndPwdEmpty'));
 		}
 
+		// Check if account is locked due to too many failed attempts
+		const lockInfo = await c.env.kv.get(KvConst.LOGIN_LOCK + email, { type: 'json' });
+		if (lockInfo) {
+			throw new BizError(t('loginLocked'));
+		}
+
 		const userRow = await userService.selectByEmailIncludeDel(c, email);
 
 		if (!userRow) {
@@ -222,8 +228,24 @@ const loginService = {
 		}
 
 		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password) && !noVerifyPwd) {
+			// Increment fail count
+			const failCount = (await c.env.kv.get(KvConst.LOGIN_FAIL + email, { type: 'json' })) || 0;
+			const newCount = failCount + 1;
+
+			if (newCount >= constant.LOGIN_FAIL_MAX) {
+				// Lock the account for 30 minutes
+				await c.env.kv.put(KvConst.LOGIN_LOCK + email, JSON.stringify({ lockedAt: dayjs().toISOString() }), { expirationTtl: constant.LOGIN_LOCK_TTL });
+				await c.env.kv.delete(KvConst.LOGIN_FAIL + email);
+				throw new BizError(t('loginLocked'));
+			}
+
+			await c.env.kv.put(KvConst.LOGIN_FAIL + email, JSON.stringify(newCount), { expirationTtl: constant.LOGIN_LOCK_TTL });
 			throw new BizError(t('IncorrectPwd'));
 		}
+
+		// Login success — clear fail count and lock
+		await c.env.kv.delete(KvConst.LOGIN_FAIL + email);
+		await c.env.kv.delete(KvConst.LOGIN_LOCK + email);
 
 		const uuid = uuidv4();
 		const jwt = await JwtUtils.generateToken(c,{ userId: userRow.userId, token: uuid });
